@@ -1,11 +1,17 @@
 // string-encoder.js — String encryption/encoding used across presets.
 // Each preset decides how aggressive the encoding is.
+//
+// Encoder layers (in order):
+//   1) XOR with rolling key:  working[i] = byte[i] ^ ((salt + i*31) & 0xff)
+//   2) reverse the byte array
+//   3) XOR with per-position salt2: working[i] = working[i] ^ ((salt2 + i) & 0xff)
+//
+// The decoder reverses each layer in reverse order. Layer 1 must be undone
+// using the ORIGINAL byte index (i-1), not the reversed index (n-i).
 
 import { escapeLuaString } from "./utils.js";
 
-// Very simple but effective XOR + byte shift per character with a per-string key.
-// Returns an array of integers (0-255) that can be emitted as a Lua string with
-// decimal escapes and decoded at runtime.
+// XOR helper used by both encoder and (mirrored) decoder.
 export function xorEncode(bytes, key) {
   const out = new Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) {
@@ -22,35 +28,40 @@ export function xorDecode(encoded, key) {
   return out;
 }
 
-// Multi-layer: 1) XOR with a rolling key, 2) reverse bytes, 3) XOR with a
-// per-string "salt" byte.
+// Multi-layer encode:
+//   Layer 1: XOR with rolling key (original index based)
+//   Layer 2: reverse byte order
+//   Layer 3: XOR with position-dependent salt2
+//
+// Correctness contract (must match luaDecodeReverse and the inline decoder
+// emitted by vm-generator.js):
+//   bytes[j] = enc[n-1-j] ^ ((salt2 + (n-1-j)) & 0xff) ^ ((salt + j*31) & 0xff)
 export function layeredEncode(str, salt) {
   const bytes = [];
   for (let i = 0; i < str.length; i++) bytes.push(str.charCodeAt(i) & 0xff);
-  let working = bytes.slice();
-  // Layer 1: XOR with rolling key
-  working = xorEncode(working, salt);
-  // Layer 2: reverse
+
+  // Layer 1 — XOR with rolling key (index = original byte index).
+  let working = xorEncode(bytes, salt);
+
+  // Layer 2 — reverse.
   working.reverse();
-  // Layer 3: XOR with position-dependent salt2
+
+  // Layer 3 — XOR with position-dependent salt2.
   const salt2 = (salt * 131 + 17) & 0xff;
   for (let i = 0; i < working.length; i++) {
     working[i] = (working[i] ^ ((salt2 + i) & 0xff)) & 0xff;
   }
+
   return working;
 }
 
-// Produce a Lua expression that decodes a layered-encoded byte array at runtime.
-// The generated code has the same shape as the encoder but is randomized in
-// naming and can be inlined. We return the byte array itself; the caller
-// decides whether to inline the decoder or use the shared one.
+// Emit a Lua array literal of numbers, compacted into groups for readability.
 export function emitEncodedBytes(bytes) {
-  // Return a Lua array literal of numbers, compacted into groups for readability.
-  // e.g. {173,45,28,90,...}
   return "{" + bytes.join(",") + "}";
 }
 
 // Emit a Lua string literal from bytes using decimal escapes.
+// Example: [72, 101, 108] -> "\72\101\108"
 export function emitByteString(bytes) {
   let out = '"';
   for (const b of bytes) out += "\\" + b;
@@ -58,9 +69,9 @@ export function emitByteString(bytes) {
   return out;
 }
 
-// Runtime Lua decoder snippets (as strings of Lua source). The transformer
-// generates fresh names and injects them into the VM preamble; this function
-// only contains the algorithm.
+// Runtime Lua XOR-of-byte-string decoder.
+// NOTE: This helper is a reference implementation used by external callers;
+// the obfuscator itself emits an inline decoder via vm-generator.js.
 export function luaDecodeFunction(nameDecoder, nameStr, nameKey) {
   // function <nameDecoder>(s, k)
   //   local out, i, n = {}, 1, #s
@@ -82,15 +93,16 @@ end
 `.trim();
 }
 
+// Runtime Lua layered decoder — FIXED to use (i-1)*31 for the rolling XOR.
 export function luaDecodeReverse(nameDecoder, nameBytes, nameSalt) {
   // function <nameDecoder>(arr, salt)
   //   local out = {}
   //   local n = #arr
-  //   local salt2 = (salt * 131 + 17) % 256
+  //   local s2 = (salt * 131 + 17) % 256
   //   for i = 1, n do
   //     local b = arr[n - i + 1]
-  //     b = bit32.bxor(b, (salt2 + (n - i)) % 256)
-  //     b = bit32.bxor(b, (salt + (n - i) * 31) % 256)
+  //     b = bit32.bxor(b, (s2 + (n - i)) % 256)       -- undo layer 3
+  //     b = bit32.bxor(b, (salt + (i - 1) * 31) % 256) -- undo layer 1 (FIXED)
   //     out[i] = string.char(b)
   //   end
   //   return table.concat(out)
@@ -102,10 +114,10 @@ local function ${nameDecoder}(${nameBytes}, ${nameSalt})
   for i = 1, n do
     local b = ${nameBytes}[n - i + 1]
     b = bit32.bxor(b, (s2 + (n - i)) % 256)
-    b = bit32.bxor(b, (${nameSalt} + (n - i) * 31) % 256)
+    b = bit32.bxor(b, (${nameSalt} + (i - 1) * 31) % 256)
     out[i] = string.char(b)
   end
   return table.concat(out)
 end
 `.trim();
-      }
+}
