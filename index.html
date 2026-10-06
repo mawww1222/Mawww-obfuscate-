@@ -21,6 +21,7 @@
       <nav class="nav">
         <button class="nav-item active" data-target="workspace">Workspace</button>
         <button class="nav-item" data-target="stats">Statistics</button>
+        <button class="nav-item" data-target="files">Files</button>
         <button class="nav-item" data-target="about">About</button>
       </nav>
       <div class="sidebar-footer">
@@ -54,9 +55,12 @@
             <div class="editor-head">
               <div class="editor-head-title">
                 <span class="badge">Input</span>
-                <span class="filename">source.lua</span>
+                <span class="filename" id="inputFilename">source.lua</span>
               </div>
               <div class="editor-head-actions">
+                <button class="btn btn-ghost btn-sm" id="uploadBtn" title="Upload file .lua / .luau / .txt">
+                  <span class="btn-icon">⬆</span> Upload
+                </button>
                 <button class="btn btn-ghost btn-sm" id="pasteBtn">Paste</button>
                 <button class="btn btn-ghost btn-sm" id="clearBtn">Clear</button>
                 <button class="btn btn-ghost btn-sm" id="formatBtn">Format</button>
@@ -68,7 +72,7 @@
             </div>
             <div class="editor-foot">
               <span id="inputStats">0 lines · 0 chars</span>
-              <span class="hint">Drop .lua / .txt file here</span>
+              <span class="hint">Drag &amp; drop .lua / .luau / .txt file here</span>
             </div>
           </div>
 
@@ -80,8 +84,15 @@
               </div>
               <div class="editor-head-actions">
                 <button class="btn btn-ghost btn-sm" id="copyBtn">Copy</button>
-                <button class="btn btn-ghost btn-sm" id="downloadLuaBtn">.lua</button>
-                <button class="btn btn-ghost btn-sm" id="downloadTxtBtn">.txt</button>
+                <button class="btn btn-ghost btn-sm" id="downloadLuaBtn">
+                  <span class="btn-icon">⬇</span> .lua
+                </button>
+                <button class="btn btn-ghost btn-sm" id="downloadLuauBtn">
+                  <span class="btn-icon">⬇</span> .luau
+                </button>
+                <button class="btn btn-ghost btn-sm" id="downloadTxtBtn">
+                  <span class="btn-icon">⬇</span> .txt
+                </button>
               </div>
             </div>
             <div class="editor-body" id="outputEditorWrap">
@@ -111,6 +122,87 @@
         </div>
       </section>
 
+      <section class="files-panel hidden" id="panel-files">
+        <div class="files-grid">
+          <div class="file-card">
+            <div class="file-card-head">
+              <h3>Upload File</h3>
+              <p>Pilih file Lua / Luau / TXT dari perangkat Anda.</p>
+            </div>
+            <div class="file-drop" id="fileDrop">
+              <input type="file" id="fileInput" accept=".lua,.luau,.txt,text/plain" hidden />
+              <div class="file-drop-icon">⬆</div>
+              <div class="file-drop-title">Drop file di sini atau klik untuk memilih</div>
+              <div class="file-drop-sub">Maks 2 MB · .lua / .luau / .txt</div>
+              <button class="btn btn-primary btn-lg" id="browseFileBtn" type="button">
+                Pilih File
+              </button>
+            </div>
+            <div class="file-meta hidden" id="fileMeta">
+              <div class="file-meta-row"><span>Nama file</span><strong id="fileMetaName">—</strong></div>
+              <div class="file-meta-row"><span>Ukuran</span><strong id="fileMetaSize">—</strong></div>
+              <div class="file-meta-row"><span>Baris</span><strong id="fileMetaLines">—</strong></div>
+              <div class="file-meta-row"><span>Tipe</span><strong id="fileMetaType">—</strong></div>
+              <div class="file-meta-row"><span>Terakhir diubah</span><strong id="fileMetaMtime">—</strong></div>
+            </div>
+          </div>
+
+          <div class="file-card">
+            <div class="file-card-head">
+              <h3>Download Hasil</h3>
+              <p>Simpan hasil obfuscation dalam berbagai format.</p>
+            </div>
+            <div class="download-list">
+              <button class="download-item" id="dlLua">
+                <div class="download-icon">LUA</div>
+                <div class="download-info">
+                  <strong>protected.lua</strong>
+                  <span>Format Lua standar</span>
+                </div>
+                <div class="download-arrow">⬇</div>
+              </button>
+              <button class="download-item" id="dlLuau">
+                <div class="download-icon">LUAU</div>
+                <div class="download-info">
+                  <strong>protected.luau</strong>
+                  <span>Format Luau (Roblox)</span>
+                </div>
+                <div class="download-arrow">⬇</div>
+              </button>
+              <button class="download-item" id="dlTxt">
+                <div class="download-icon">TXT</div>
+                <div class="download-info">
+                  <strong>protected.txt</strong>
+                  <span>Plain text</span>
+                </div>
+                <div class="download-arrow">⬇</div>
+              </button>
+              <button class="download-item" id="dlZipLike">
+                <div class="download-icon">MD</div>
+                <div class="download-info">
+                  <strong>report.md</strong>
+                  <span>Laporan + hasil</span>
+                </div>
+                <div class="download-arrow">⬇</div>
+              </button>
+              <button class="download-item" id="dlInputBackup">
+                <div class="download-icon">BK</div>
+                <div class="download-info">
+                  <strong>source_backup.lua</strong>
+                  <span>Backup source input</span>
+                </div>
+                <div class="download-arrow">⬇</div>
+              </button>
+            </div>
+            <div class="file-meta" id="outputMeta">
+              <div class="file-meta-row"><span>Status</span><strong id="outMetaStatus">Belum ada hasil</strong></div>
+              <div class="file-meta-row"><span>Ukuran output</span><strong id="outMetaSize">—</strong></div>
+              <div class="file-meta-row"><span>Preset</span><strong id="outMetaPreset">—</strong></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="about-panel hidden" id="panel-about">
         <h3>VM Obfuscator</h3>
         <p>Obfuscator ini bekerja sepenuhnya di browser Anda. Tidak ada source code yang dikirim ke server manapun.</p>
@@ -133,4 +225,4 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
-  </html>
+</html>
