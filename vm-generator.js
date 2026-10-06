@@ -15,8 +15,8 @@ export const PRESETS = {
 
 // Opcode semantic slots. Each preset instance randomizes the numeric mapping.
 const OP = {
-  PUSH_CONST: "push_const",   // push decoded constant to accumulator
-  PUSH_RAW: "push_raw",       // push raw string (used for whitespace)
+  PUSH_CONST: "push_const",
+  PUSH_RAW: "push_raw",
   DUMMY_A: "dummy_a",
   DUMMY_B: "dummy_b",
   DUMMY_C: "dummy_c",
@@ -112,9 +112,7 @@ export function generateObfuscated(transformedSource, opts = {}) {
     });
   }
 
-  // 3) Optionally split large constants into halves and store them separately.
-  //    For strong/extreme we also produce a "spliced" constant pool where the
-  //    original strings are broken into two halves and recombined by the VM.
+  // 3) Instruction stream.
   const instructions = [];
   const op = opcodes.map;
 
@@ -145,14 +143,15 @@ export function generateObfuscated(transformedSource, opts = {}) {
   //    {encoded_op, a, b} where encoded_op = op XOR opcodeKey.
   const encodedInstrs = instructions.map(ins => {
     const encOp = (ins.op ^ opcodeKey) & 0xff;
-    // Encode operands with the arg key as well.
     const a = (ins.a ^ keyArg) & 0xffff;
     const b = (ins.b ^ keyArg) & 0xff;
     return [encOp, a, b];
   });
 
-  // If preset requires scrambling, permute the order using a fixed shuffle
-  // mapping stored separately and reassembled at runtime by index lookups.
+  // If preset requires scrambling, permute the order and store the inverse
+  // order so the VM can reconstruct. We preserve logical order in `arg`,
+  // because PUSH_CONST uses `arg` as the constant index — reordering the
+  // physical array does not affect the logical result.
   let instrOrder = null;
   if (preset.scrambledInstr) {
     instrOrder = [...Array(encodedInstrs.length).keys()];
@@ -161,16 +160,12 @@ export function generateObfuscated(transformedSource, opts = {}) {
       [instrOrder[i], instrOrder[j]] = [instrOrder[j], instrOrder[i]];
     }
     const shuffled = instrOrder.map(k => encodedInstrs[k]);
-    // Store the inverse order so the VM can reconstruct.
-    const inverse = new Array(instrOrder.length);
-    for (let i = 0; i < instrOrder.length; i++) inverse[instrOrder[i]] = i;
-    // Reorder: keep the shuffled array and store inverse order for reconstruction.
     encodedInstrs.length = 0;
     for (const v of shuffled) encodedInstrs.push(v);
-    // Note: order info goes to the keyTable below.
+    // instrOrder is written into the keyTable for potential future use.
   }
 
-  // 5) Optional checksum
+  // 5) Optional checksum over the final decoded source.
   let checksumExpr = "0";
   if (preset.checksum) {
     const byteSum = transformedSource.split("").reduce((a, c) => (a + c.charCodeAt(0)) & 0xffff, 0);
@@ -178,8 +173,7 @@ export function generateObfuscated(transformedSource, opts = {}) {
     checksumExpr = `((${byteSum} ~ ${lenSum}) ~ 0x${(opcodeKey ^ keyArg).toString(16)}) & 0xffff`;
   }
 
-  // 6) Optional control-flow wrapping: wrap each instruction stream in a chain
-  //    of decoys that must not affect the final result.
+  // 6) Optional control-flow wrapping.
   let cfWrapperOpen = "";
   let cfWrapperClose = "";
   if (preset.wrapCF) {
@@ -188,29 +182,29 @@ export function generateObfuscated(transformedSource, opts = {}) {
   }
 
   // ---- Build final Lua source ----
-
   const L = [];
   L.push("-- VM Protected Script");
   L.push("-- This file was generated automatically. Do not edit.");
   L.push("");
 
-  // Emit XOR decoder for opcode/arg values.
+  // XOR decode helper used for opcode/operand values.
   L.push(`local ${N.decodeXor} = function(a, k) return bit32.bxor(a, k) end`);
-  // Emit layered decoder for constants.
+
+  // Layered constant decoder — FIXED formula: (i - 1) * 31 for Layer 1.
   L.push(`local ${N.decodeLayered} = function(${N.ins}, ${N.arg})`);
   L.push(`  local out, n = {}, #${N.ins}`);
   L.push(`  local s2 = (${N.arg} * 131 + 17) % 256`);
   L.push(`  for i = 1, n do`);
   L.push(`    local b = ${N.ins}[n - i + 1]`);
   L.push(`    b = bit32.bxor(b, (s2 + (n - i)) % 256)`);
-  L.push(`    b = bit32.bxor(b, (${N.arg} + (n - i) * 31) % 256)`);
+  L.push(`    b = bit32.bxor(b, (${N.arg} + (i - 1) * 31) % 256)`);
   L.push(`    out[i] = string.char(b)`);
   L.push(`  end`);
   L.push(`  return table.concat(out)`);
   L.push(`end`);
   L.push("");
 
-  // Constants table (as encoded byte string literals).
+  // Constants table (encoded byte-string literals).
   L.push(`local ${N.constTable} = {`);
   for (let i = 0; i < constants.length; i++) {
     const c = constants[i];
@@ -219,7 +213,7 @@ export function generateObfuscated(transformedSource, opts = {}) {
   L.push(`}`);
   L.push("");
 
-  // Salt table
+  // Salt table.
   L.push(`local ${N.saltTable} = {`);
   for (let i = 0; i < constants.length; i++) {
     L.push(`  [${i + 1}] = ${constants[i].salt},`);
@@ -227,7 +221,7 @@ export function generateObfuscated(transformedSource, opts = {}) {
   L.push(`}`);
   L.push("");
 
-  // Instruction table
+  // Instruction table.
   L.push(`local ${N.instrTable} = {`);
   for (const ins of encodedInstrs) {
     L.push(`  {${ins[0]},${ins[1]},${ins[2]}},`);
@@ -235,23 +229,22 @@ export function generateObfuscated(transformedSource, opts = {}) {
   L.push(`}`);
   L.push("");
 
-  // Key table (opcodeKey, keyArg, optional inverse order)
+  // Key table: {opcodeKey, keyArg, optional order array}
   const orderList = instrOrder ? instrOrder.join(",") : "";
   L.push(`local ${N.keyTable} = {${opcodeKey},${keyArg},${orderList ? "{" + orderList + "}" : "nil"}}`);
   L.push("");
 
-  // Decoded constant cache
+  // Decoded constant cache.
   L.push(`local ${N.acc} = {}`);
   L.push("");
 
-  // VM loop.
+  // VM interpreter loop.
   L.push(cfWrapperOpen + `local ${N.n} = #${N.instrTable}`);
   L.push(`for ${N.i} = 1, ${N.n} do`);
   L.push(`  local ${N.ins} = ${N.instrTable}[${N.i}]`);
   L.push(`  local ${N.op} = ${N.decodeXor}(${N.ins}[1], ${N.keyTable}[1])`);
   L.push(`  local ${N.arg} = ${N.decodeXor}(${N.ins}[2], ${N.keyTable}[2])`);
 
-  // Opcode dispatch
   const opConst = op.PUSH_CONST;
   L.push(`  if ${N.op} == ${opConst} then`);
   L.push(`    local idx = ${N.arg} + 1`);
@@ -260,30 +253,24 @@ export function generateObfuscated(transformedSource, opts = {}) {
   L.push(`    end`);
   L.push(`  end`);
 
-  // Add dummy branches for the other opcodes so the dispatch table looks real.
+  // Dummy opcode branches — they must NOT touch acc.
   for (const k of ["DUMMY_A", "DUMMY_B", "DUMMY_C"]) {
     L.push(`  if ${N.op} == ${op[k]} then`);
     L.push(`    local _ = ${N.arg} + ${N.ins}[3]`);
     L.push(`  end`);
   }
   L.push(`end` + cfWrapperClose);
+  L.push("");
 
-  // Reassemble in original order if scrambled.
+  // Reassemble in logical (chunk) order.
+  // Because `arg` stores the original constant index, `acc` is already keyed
+  // by that index. We simply iterate 1..N and pick them up.
   L.push(`local ${N.out} = {}`);
-  if (instrOrder) {
-    L.push(`for _, v in ipairs(${N.acc}) do ${N.out}[#${N.out} + 1] = v end`);
-    // Because of scrambling, `acc` may be keyed by original index (which we
-    // stored as `arg`), so reorder by iterating over constants in order.
-    L.push(`${N.out} = {}`);
-    L.push(`for i = 1, ${constants.length} do ${N.out}[i] = ${N.acc}[i] end`);
-  } else {
-    L.push(`for i = 1, ${constants.length} do ${N.out}[i] = ${N.acc}[i] end`);
-  }
-
+  L.push(`for i = 1, ${constants.length} do ${N.out}[i] = ${N.acc}[i] end`);
   L.push(`local ${N.src} = table.concat(${N.out}, "")`);
   L.push("");
 
-  // Optional checksum/integrity guard.
+  // Optional checksum / integrity guard.
   if (preset.checksum) {
     L.push(`do`);
     L.push(`  local ${N.checksum} = 0`);
@@ -291,8 +278,9 @@ export function generateObfuscated(transformedSource, opts = {}) {
     L.push(`  if ${N.checksum} ~= (${checksumExpr}) then return end`);
     L.push(`end`);
   }
+  L.push("");
 
-  // Load and run.
+  // Load & run.
   L.push(`local ${N.loader} = loadstring or load`);
   L.push(`local ${N.fn} = ${N.loader}(${N.src})`);
   L.push(`if type(${N.fn}) == "function" then ${N.fn}() end`);
