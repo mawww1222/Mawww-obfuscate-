@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VM Obfuscator — Lua/Luau Protector</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">VM</div>
+        <div class="brand-meta">
+          <h1>Obfuscator</h1>
+          <span>Lua / Luau</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-target="workspace">Workspace</button>
+        <button class="nav-item" data-target="stats">Statistics</button>
+        <button class="nav-item" data-target="about">About</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="dot"></span>
+        <span>Client-side · 100%</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h2 id="pageTitle">VM Obfuscator</h2>
+          <p id="pageSubtitle">Protect Lua/Luau scripts with multi-layer VM encoding.</p>
+        </div>
+        <div class="topbar-actions">
+          <select id="presetSelect" class="select">
+            <option value="light">Light</option>
+            <option value="medium" selected>Medium</option>
+            <option value="strong">Strong</option>
+            <option value="extreme">Extreme</option>
+          </select>
+          <button id="obfuscateBtn" class="btn btn-primary btn-lg">
+            <span class="btn-icon">▶</span> Obfuscate
+          </button>
+        </div>
+      </header>
+
+      <section class="workspace" id="panel-workspace">
+        <div class="editor-grid">
+          <div class="editor-card">
+            <div class="editor-head">
+              <div class="editor-head-title">
+                <span class="badge">Input</span>
+                <span class="filename">source.lua</span>
+              </div>
+              <div class="editor-head-actions">
+                <button class="btn btn-ghost btn-sm" id="pasteBtn">Paste</button>
+                <button class="btn btn-ghost btn-sm" id="clearBtn">Clear</button>
+                <button class="btn btn-ghost btn-sm" id="formatBtn">Format</button>
+                <button class="btn btn-ghost btn-sm" id="sampleBtn">Sample</button>
+              </div>
+            </div>
+            <div class="editor-body" id="inputEditorWrap">
+              <textarea id="inputEditor" spellcheck="false"></textarea>
+            </div>
+            <div class="editor-foot">
+              <span id="inputStats">0 lines · 0 chars</span>
+              <span class="hint">Drop .lua / .txt file here</span>
+            </div>
+          </div>
+
+          <div class="editor-card">
+            <div class="editor-head">
+              <div class="editor-head-title">
+                <span class="badge badge-out">Output</span>
+                <span class="filename" id="outFilename">protected.lua</span>
+              </div>
+              <div class="editor-head-actions">
+                <button class="btn btn-ghost btn-sm" id="copyBtn">Copy</button>
+                <button class="btn btn-ghost btn-sm" id="downloadLuaBtn">.lua</button>
+                <button class="btn btn-ghost btn-sm" id="downloadTxtBtn">.txt</button>
+              </div>
+            </div>
+            <div class="editor-body" id="outputEditorWrap">
+              <textarea id="outputEditor" spellcheck="false" readonly></textarea>
+            </div>
+            <div class="editor-foot">
+              <span id="outputStats">0 lines · 0 chars</span>
+              <span class="hint" id="statusText">Idle</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+          <span id="progressLabel">Ready</span>
+        </div>
+      </section>
+
+      <section class="stats-panel hidden" id="panel-stats">
+        <div class="stat-grid">
+          <div class="stat-card"><span class="stat-label">Original size</span><span class="stat-value" id="statOrigSize">0 B</span></div>
+          <div class="stat-card"><span class="stat-label">Obfuscated size</span><span class="stat-value" id="statObfSize">0 B</span></div>
+          <div class="stat-card"><span class="stat-label">Instructions</span><span class="stat-value" id="statInstrCount">0</span></div>
+          <div class="stat-card"><span class="stat-label">Constants</span><span class="stat-value" id="statConstCount">0</span></div>
+          <div class="stat-card"><span class="stat-label">Obfuscation level</span><span class="stat-value" id="statLevel">—</span></div>
+          <div class="stat-card"><span class="stat-label">Renamed symbols</span><span class="stat-value" id="statRenamed">0</span></div>
+        </div>
+      </section>
+
+      <section class="about-panel hidden" id="panel-about">
+        <h3>VM Obfuscator</h3>
+        <p>Obfuscator ini bekerja sepenuhnya di browser Anda. Tidak ada source code yang dikirim ke server manapun.</p>
+        <ul>
+          <li><strong>Light</strong> — Rename identifier + string encoder dasar.</li>
+          <li><strong>Medium</strong> — Tambahan XOR opcode encoding + constant pool terpisah.</li>
+          <li><strong>Strong</strong> — Tambahan dummy instruction + scrambled instruction table + multi-layer string encoding.</li>
+          <li><strong>Extreme</strong> — Tambahan control-flow wrapping, split constant, checksum integrity check, dan decoder layered.</li>
+        </ul>
+        <p>Output menggunakan VM interpreter sederhana yang merekonstruksi ulang source code Anda pada waktu runtime di dalam Lua environment.</p>
+      </section>
+    </main>
+
+    <div class="toast-container" id="toastContainer"></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+  </html>
